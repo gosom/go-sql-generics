@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -16,45 +17,30 @@ func main() {
 		panic(err)
 	}
 
-	alltodos, err := selectAll(ctx, db)
+	const q = "SELECT id, title, content, created_at  FROM notes"
+	notes, err := Query[Note](ctx, db, q, nil)
 	if err != nil {
 		panic(err)
 	}
-	for _, todo := range alltodos {
-		fmt.Println(todo)
-	}
-
-	fmt.Println("============ v2 =======================")
-	alltodos2, err := selectAllV2(ctx, db)
-	if err != nil {
-		panic(err)
-	}
-	for _, todo := range alltodos2 {
-		fmt.Println(todo)
-	}
-	fmt.Println("============ v3 =======================")
-	alltodos3, err := selectAllV3[Note](ctx, db)
-	if err != nil {
-		panic(err)
-	}
-	for _, todo := range alltodos3 {
-		fmt.Println(todo)
+	for i := range notes {
+		fmt.Println(notes[i])
 	}
 
 }
 
 type Note struct {
-	ID      int
-	Title   string
-	Content string
+	ID        int
+	Title     string
+	Content   string
+	CreatedAt time.Time
 }
 
 func (o *Note) String() string {
-	return fmt.Sprintf("id=%d title=%q content=%q", o.ID, o.Title, o.Content)
+	return fmt.Sprintf("id=%d title=%q content=%q createdAt=%s", o.ID, o.Title, o.Content, o.CreatedAt)
 }
 
 func (o *Note) DbBind() []any {
-	return []any{&o.ID, &o.Title, &o.Content}
+	return []any{&o.ID, &o.Title, &o.Content, &o.CreatedAt}
 }
 
 // ===============================================================
@@ -70,42 +56,8 @@ func getDbCon(ctx context.Context, dsn string) (*sql.DB, error) {
 	return db, nil
 }
 
-const q = `select id, title, content from notes`
-
-// selectAll selects all notes.
-func selectAll(ctx context.Context, db *sql.DB) ([]Note, error) {
-	rows, err := db.QueryContext(ctx, q)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Note
-	for rows.Next() {
-		var item Note
-		if err := rows.Scan(&item.ID, &item.Title, &item.Content); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-// selectAllV2 is my second attempt to make it more generic
-func selectAllV2(ctx context.Context, db *sql.DB) ([]Note, error) {
-	rows, err := db.QueryContext(ctx, q)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Note
-	for rows.Next() {
-		var item Note
-		if err := rows.Scan(item.DbBind()...); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+type DBTx interface {
+	QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
 }
 
 type Bindable[T any] interface {
@@ -113,8 +65,8 @@ type Bindable[T any] interface {
 	DbBind() []any
 }
 
-func selectAllV3[T any, PT Bindable[T]](ctx context.Context, db *sql.DB) ([]T, error) {
-	rows, err := db.QueryContext(ctx, q)
+func Query[T any, PT Bindable[T]](ctx context.Context, d DBTx, q string, args ...any) ([]T, error) {
+	rows, err := d.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -130,5 +82,4 @@ func selectAllV3[T any, PT Bindable[T]](ctx context.Context, db *sql.DB) ([]T, e
 		items = append(items, item)
 	}
 	return items, rows.Err()
-
 }
